@@ -1,0 +1,89 @@
+# Auto-fix workflow example
+name: Quality Gate - Auto Fix
+on:
+  push:
+    branches: [feature/*, bugfix/*, hotfix/*]
+
+jobs:
+  quality-gate-autofix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Development Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+
+      - name: Run Quality Gate with Auto-fix
+        id: quality-gate
+        uses: dmux/go-quality-gate-action@v1
+        with:
+          hook: "pre-commit"
+          auto-fix: true
+          fail-on-error: false
+          json-output: true
+
+      - name: Commit Auto-fixes
+        if: steps.quality-gate.outputs.result == 'failure'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Quality Gate Auto-fix"
+
+          # Check if there are any changes to commit
+          if ! git diff --quiet; then
+            git add .
+            git commit -m "🤖 Auto-fix: Code formatting and linting fixes
+            
+            Applied by Go Quality Gate Action
+            - Formatting fixes applied
+            - Linting issues resolved
+            - Code style improvements
+            
+            Co-authored-by: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>"
+            
+            git push
+            
+            echo "::notice::✅ Auto-fixes have been committed and pushed to the branch"
+          else
+            echo "::notice::ℹ️ No auto-fixes were needed or applied"
+          fi
+
+      - name: Comment on PR (if auto-fixes applied)
+        if: github.event_name == 'pull_request' && steps.quality-gate.outputs.result == 'failure'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🤖 **Quality Gate Auto-fix Applied**
+
+            I've automatically applied code formatting and linting fixes to this pull request.
+
+            **Changes made:**
+            - Code formatting improvements
+            - Linting issue resolution
+            - Style consistency fixes
+
+            The latest commit includes these automated improvements. Please review the changes.`
+            });

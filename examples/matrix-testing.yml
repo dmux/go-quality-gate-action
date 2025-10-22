@@ -1,0 +1,62 @@
+# Matrix testing across multiple platforms and configurations
+name: Quality Gate - Matrix Testing
+on: [push, pull_request]
+
+jobs:
+  quality-gate-matrix:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        hook: [pre-commit, pre-push]
+        include:
+          - os: ubuntu-latest
+            hook: pre-commit
+            config: ".github/quality-strict.yml"
+          - os: windows-latest
+            hook: pre-commit
+            config: "quality.yml"
+          - os: macos-latest
+            hook: pre-push
+            config: "quality.yml"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        shell: bash
+        run: |
+          # Create platform-specific quality configuration if needed
+          if [ ! -f "${{ matrix.config || 'quality.yml' }}" ]; then
+            echo "Creating default configuration for ${{ matrix.os }}"
+            cat > quality.yml << 'EOF'
+          tools:
+            - name: "Cross-platform Test"
+              check_command: "echo 'Platform check passed'"
+              install_command: "echo 'No installation needed'"
+
+          hooks:
+            security:
+              pre-commit:
+                - name: "🔍 Basic Check"
+                  command: "echo 'Quality check completed on ${{ matrix.os }}'"
+              pre-push:
+                - name: "🚀 Pre-push Check"
+                  command: "echo 'Pre-push validation completed on ${{ matrix.os }}'"
+          EOF
+          fi
+
+      - name: Run Quality Gate
+        uses: dmux/go-quality-gate-action@v1
+        with:
+          config-file: ${{ matrix.config || 'quality.yml' }}
+          hook: ${{ matrix.hook }}
+          json-output: true
+          fail-on-error: true
+
+      - name: Platform-specific Validation
+        shell: bash
+        run: |
+          echo "✅ Quality gate completed successfully on ${{ matrix.os }} with ${{ matrix.hook }} hook"

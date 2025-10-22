@@ -1,0 +1,51 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*"
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Get tag
+              id: tag
+              run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+            - name: Create Release
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: ${{ steps.tag.outputs.tag }}
+                  release_name: Go Quality Gate Action ${{ steps.tag.outputs.tag }}
+                  body: |
+                      ## Changes in ${{ steps.tag.outputs.tag }}
+
+                      ### ✨ Features
+                      - Updated action with latest improvements
+
+                      ### 🐛 Bug Fixes
+                      - Various bug fixes and improvements
+
+                      ### 📚 Documentation
+                      - Updated documentation and examples
+
+                      ## Usage
+
+                      ```yaml
+                      - name: Run Quality Gate
+                        uses: dmux/go-quality-gate-action@${{ steps.tag.outputs.tag }}
+                        with:
+                          hook: 'pre-commit'
+                          auto-fix: true
+                      ```
+                  draft: false
+                  prerelease: false

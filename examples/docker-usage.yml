@@ -1,0 +1,24 @@
+# Docker usage example
+name: Quality Gate - Docker
+on: [push, pull_request]
+
+jobs:
+  quality-gate-docker:
+    runs-on: ubuntu-latest
+    container:
+      image: node:18
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl git
+
+      - name: Run Quality Gate
+        uses: dmux/go-quality-gate-action@v1
+        with:
+          hook: "pre-commit"
+          json-output: true

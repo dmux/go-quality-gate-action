@@ -1,0 +1,142 @@
+# Example configuration for Go Quality Gate
+# This file demonstrates common configurations for multi-language projects
+
+tools:
+  # Security tools
+  - name: "Gitleaks"
+    check_command: "gitleaks version"
+    install_command: "go install github.com/zricethezav/gitleaks/v8@latest"
+
+  # Go tools
+  - name: "Go Formatter (gofmt)"
+    check_command: "go version"
+    install_command: "echo 'Go tools come with Go installation'"
+  - name: "Go Linter (golangci-lint)"
+    check_command: "golangci-lint version"
+    install_command: "go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+
+  # Python tools
+  - name: "Ruff (Python Linter/Formatter)"
+    check_command: "ruff --version"
+    install_command: "pip install ruff"
+  - name: "Black (Python Formatter)"
+    check_command: "black --version"
+    install_command: "pip install black"
+  - name: "MyPy (Python Type Checker)"
+    check_command: "mypy --version"
+    install_command: "pip install mypy"
+
+  # JavaScript/TypeScript tools
+  - name: "Prettier (Code Formatter)"
+    check_command: "npx prettier --version"
+    install_command: "npm install --global prettier"
+  - name: "ESLint (JavaScript Linter)"
+    check_command: "npx eslint --version"
+    install_command: "npm install --global eslint"
+
+  # Rust tools
+  - name: "Rustfmt (Rust Formatter)"
+    check_command: "rustfmt --version"
+    install_command: "rustup component add rustfmt"
+  - name: "Clippy (Rust Linter)"
+    check_command: "cargo clippy --version"
+    install_command: "rustup component add clippy"
+
+hooks:
+  # Security checks (run for all projects)
+  security:
+    pre-commit:
+      - name: "🔒 Secret Scanning"
+        command: "gitleaks detect --no-git --source . --verbose"
+        output_rules:
+          on_failure_message: "⚠️ Potential secrets detected! Please review before committing."
+
+  # Go project hooks
+  golang:
+    pre-commit:
+      - name: "🎨 Go Format Check"
+        command: "gofmt -l ."
+        fix_command: "gofmt -w ."
+        output_rules:
+          show_on: failure
+          on_failure_message: "Go code needs formatting. Run with --fix to auto-format."
+      - name: "🔍 Go Lint Check"
+        command: "golangci-lint run"
+        output_rules:
+          show_on: always
+      - name: "🧪 Go Tests"
+        command: "go test ./..."
+        output_rules:
+          show_on: always
+
+    pre-push:
+      - name: "🏗️ Go Build Check"
+        command: "go build ./..."
+        output_rules:
+          show_on: failure
+
+  # Python project hooks
+  python:
+    pre-commit:
+      - name: "🎨 Python Format Check (Ruff)"
+        command: "ruff format --check ."
+        fix_command: "ruff format ."
+        output_rules:
+          show_on: failure
+          on_failure_message: "Python code formatting issues found. Run with --fix to auto-format."
+      - name: "🔍 Python Lint Check (Ruff)"
+        command: "ruff check ."
+        fix_command: "ruff check . --fix"
+        output_rules:
+          show_on: failure
+      - name: "🏷️ Python Type Check (MyPy)"
+        command: "mypy ."
+        output_rules:
+          show_on: failure
+      - name: "🧪 Python Tests"
+        command: "python -m pytest"
+        output_rules:
+          show_on: always
+
+  # JavaScript/TypeScript project hooks
+  javascript:
+    pre-commit:
+      - name: "🎨 Format Check (Prettier)"
+        command: "npx prettier --check '**/*.{js,jsx,ts,tsx,json,css,md}'"
+        fix_command: "npx prettier --write '**/*.{js,jsx,ts,tsx,json,css,md}'"
+        output_rules:
+          show_on: failure
+          on_failure_message: "Code formatting issues found. Run with --fix to auto-format."
+      - name: "🔍 Lint Check (ESLint)"
+        command: "npx eslint '**/*.{js,jsx,ts,tsx}'"
+        fix_command: "npx eslint '**/*.{js,jsx,ts,tsx}' --fix"
+        output_rules:
+          show_on: failure
+      - name: "🧪 JavaScript Tests"
+        command: "npm test"
+        output_rules:
+          show_on: always
+
+  # Rust project hooks
+  rust:
+    pre-commit:
+      - name: "🎨 Rust Format Check"
+        command: "cargo fmt -- --check"
+        fix_command: "cargo fmt"
+        output_rules:
+          show_on: failure
+          on_failure_message: "Rust code needs formatting. Run with --fix to auto-format."
+      - name: "🔍 Rust Lint Check (Clippy)"
+        command: "cargo clippy -- -D warnings"
+        output_rules:
+          show_on: failure
+      - name: "🧪 Rust Tests"
+        command: "cargo test"
+        output_rules:
+          show_on: always
+
+    pre-push:
+      - name: "🏗️ Rust Build Check"
+        command: "cargo build --release"
+        output_rules:
+          show_on: failure

@@ -1,0 +1,117 @@
+# Advanced workflow with custom processing
+name: Quality Gate - Advanced Processing
+on: [push, pull_request]
+
+jobs:
+  quality-gate-advanced:
+    runs-on: ubuntu-latest
+    outputs:
+      quality-result: ${{ steps.qg.outputs.result }}
+      quality-duration: ${{ steps.qg.outputs.duration }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          # Install additional tools for processing
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Run Quality Gate
+        id: qg
+        uses: dmux/go-quality-gate-action@v1
+        with:
+          hook: "pre-commit"
+          json-output: true
+          fail-on-error: false
+
+      - name: Process Quality Gate Results
+        id: process
+        run: |
+          echo "Processing quality gate results..."
+
+          # Parse JSON output
+          RESULT='${{ steps.qg.outputs.output }}'
+          echo "Raw output: $RESULT"
+
+          # Extract failed checks
+          FAILED_CHECKS=$(echo "$RESULT" | jq -r '.results[]? | select(.success == false) | .hook.Name' | tr '\n' ',' | sed 's/,$//')
+          echo "failed_checks=$FAILED_CHECKS" >> $GITHUB_OUTPUT
+
+          # Count total checks
+          TOTAL_CHECKS=$(echo "$RESULT" | jq '.results | length // 0')
+          echo "total_checks=$TOTAL_CHECKS" >> $GITHUB_OUTPUT
+
+          # Count failed checks
+          FAILED_COUNT=$(echo "$RESULT" | jq '[.results[]? | select(.success == false)] | length')
+          echo "failed_count=$FAILED_COUNT" >> $GITHUB_OUTPUT
+
+          # Calculate success rate
+          if [ "$TOTAL_CHECKS" -gt 0 ]; then
+            SUCCESS_RATE=$(echo "scale=2; (($TOTAL_CHECKS - $FAILED_COUNT) * 100) / $TOTAL_CHECKS" | bc -l)
+            echo "success_rate=$SUCCESS_RATE" >> $GITHUB_OUTPUT
+          else
+            echo "success_rate=100" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Quality Report
+        run: |
+          cat > quality-report.md << EOF
+          # Quality Gate Report
+
+          ## Summary
+          - **Overall Result**: ${{ steps.qg.outputs.result }}
+          - **Total Checks**: ${{ steps.process.outputs.total_checks }}
+          - **Failed Checks**: ${{ steps.process.outputs.failed_count }}
+          - **Success Rate**: ${{ steps.process.outputs.success_rate }}%
+          - **Duration**: ${{ steps.qg.outputs.duration }}ms
+
+          ## Failed Checks
+          ${{ steps.process.outputs.failed_checks }}
+
+          ## Raw Output
+          \`\`\`json
+          ${{ steps.qg.outputs.output }}
+          \`\`\`
+          EOF
+
+          echo "Quality report generated"
+          cat quality-report.md
+
+      - name: Upload Quality Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: quality-report
+          path: quality-report.md
+
+      - name: Comment on PR with Report
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('quality-report.md', 'utf8');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: report
+            });
+
+  notification:
+    needs: quality-gate-advanced
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Send Notification
+        run: |
+          if [ "${{ needs.quality-gate-advanced.outputs.quality-result }}" = "failure" ]; then
+            echo "🚨 Quality gate failed! Manual review required."
+            # Add your notification logic here (Slack, Teams, email, etc.)
+          else
+            echo "✅ Quality gate passed successfully!"
+          fi

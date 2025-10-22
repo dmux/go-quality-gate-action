@@ -1,0 +1,69 @@
+# Multi-language project example
+name: Quality Gate - Multi-Language
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Install Dependencies
+        run: |
+          # Install Node.js dependencies
+          if [ -f "package.json" ]; then
+            npm ci
+          fi
+
+          # Install Python dependencies
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+
+          # Install Go dependencies
+          if [ -f "go.mod" ]; then
+            go mod download
+          fi
+
+      - name: Run Quality Gate
+        uses: dmux/go-quality-gate-action@v1
+        with:
+          config-file: ".github/quality.yml"
+          hook: "pre-commit"
+          auto-fix: false
+          json-output: true
+          fail-on-error: true
+          install-dependencies: true
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: quality-gate-results
+          path: |
+            quality-gate-*.json
+            quality-gate-*.log

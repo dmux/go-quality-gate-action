@@ -1,0 +1,14 @@
+# Basic usage example
+name: Quality Gate - Basic
+on: [push, pull_request]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Quality Gate
+        uses: dmux/go-quality-gate-action@v1
+        with:
+          hook: "pre-commit"

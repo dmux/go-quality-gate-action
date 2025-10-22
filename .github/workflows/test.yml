@@ -1,0 +1,104 @@
+name: Test Go Quality Gate Action
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+
+jobs:
+    test-action:
+        strategy:
+            matrix:
+                os: [ubuntu-latest, windows-latest, macos-latest]
+
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Create test configuration
+              shell: bash
+              run: |
+                  cat > quality.yml << 'EOF'
+                  tools:
+                    - name: "Test Tool"
+                      check_command: "echo 'test' > /dev/null 2>&1 && echo 'success' || echo 'success'"
+                      install_command: "echo 'No installation needed'"
+
+                  hooks:
+                    security:
+                      pre-commit:
+                        - name: "🔍 Test Check"
+                          command: "echo 'All checks passed!'"
+                          output_rules:
+                            on_failure_message: "Test failed"
+                  EOF
+
+            - name: Test Action (Basic)
+              id: test-basic
+              uses: ./
+              with:
+                  hook: "pre-commit"
+                  json-output: true
+                  fail-on-error: false
+
+            - name: Verify Basic Test Output
+              shell: bash
+              run: |
+                  echo "Result: ${{ steps.test-basic.outputs.result }}"
+                  echo "Duration: ${{ steps.test-basic.outputs.duration }}ms"
+                  if [ "${{ steps.test-basic.outputs.result }}" != "success" ]; then
+                    echo "❌ Basic test failed"
+                    exit 1
+                  fi
+                  echo "✅ Basic test passed"
+
+            - name: Create test project with issues
+              shell: bash
+              run: |
+                  mkdir -p test-project
+                  echo 'unterminated string' > test-project/bad.js
+
+                  cat > quality.yml << 'EOF'
+                  tools:
+                    - name: "Echo Tool"
+                      check_command: "echo --version 2>/dev/null || true"
+                      install_command: "echo 'No installation needed'"
+
+                  hooks:
+                    security:
+                      pre-commit:
+                        - name: "🔍 Syntax Check"
+                          command: "echo 'Syntax error found in test-project/bad.js' && exit 1"
+                          output_rules:
+                            on_failure_message: "Syntax errors detected!"
+                  EOF
+
+            - name: Test Action (Failure Case)
+              id: test-failure
+              uses: ./
+              with:
+                  hook: "pre-commit"
+                  json-output: true
+                  fail-on-error: false
+
+            - name: Verify Failure Test Output
+              shell: bash
+              run: |
+                  echo "Result: ${{ steps.test-failure.outputs.result }}"
+                  if [ "${{ steps.test-failure.outputs.result }}" != "failure" ]; then
+                    echo "❌ Failure test should have failed"
+                    exit 1
+                  fi
+                  echo "✅ Failure test correctly detected issues"
+
+            - name: Test Action (Auto-fix simulation)
+              uses: ./
+              with:
+                  hook: "pre-commit"
+                  auto-fix: true
+                  json-output: true
+                  fail-on-error: false

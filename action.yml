@@ -1,0 +1,217 @@
+name: "Go Quality Gate"
+description: "A comprehensive code quality control tool built in Go with Git hooks support"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  version:
+    description: "Version of go-quality-gate to use"
+    required: false
+    default: "latest"
+
+  config-file:
+    description: "Path to the quality.yml configuration file"
+    required: false
+    default: "quality.yml"
+
+  hook:
+    description: "Hook to execute (pre-commit, pre-push)"
+    required: false
+    default: "pre-commit"
+
+  auto-fix:
+    description: "Enable automatic fixes when possible"
+    required: false
+    default: "false"
+
+  json-output:
+    description: "Output results in JSON format"
+    required: false
+    default: "true"
+
+  fail-on-error:
+    description: "Fail the action when quality checks fail"
+    required: false
+    default: "true"
+
+  install-dependencies:
+    description: "Automatically install missing quality tools"
+    required: false
+    default: "true"
+
+  working-directory:
+    description: "Working directory to run the quality gate"
+    required: false
+    default: "."
+
+outputs:
+  result:
+    description: "Quality gate execution result (success/failure)"
+    value: ${{ steps.quality-gate.outputs.result }}
+
+  output:
+    description: "Quality gate output (JSON format when json-output is true)"
+    value: ${{ steps.quality-gate.outputs.output }}
+
+  duration:
+    description: "Total execution time in milliseconds"
+    value: ${{ steps.quality-gate.outputs.duration }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Go Quality Gate
+      id: setup
+      shell: bash
+      run: |
+        set -e
+
+        echo "::group::Installing Go Quality Gate"
+
+        # Determine OS and architecture
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+
+        case $ARCH in
+          x86_64|amd64) ARCH="amd64" ;;
+          aarch64|arm64) ARCH="arm64" ;;
+          *) echo "::error::Unsupported architecture: $ARCH"; exit 1 ;;
+        esac
+
+        # Set download URL based on version
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          DOWNLOAD_URL="https://github.com/dmux/go-quality-gate/releases/latest/download/quality-gate-${OS}-${ARCH}"
+        else
+          DOWNLOAD_URL="https://github.com/dmux/go-quality-gate/releases/download/${{ inputs.version }}/quality-gate-${OS}-${ARCH}"
+        fi
+
+        echo "Downloading from: $DOWNLOAD_URL"
+
+        # Download and install
+        curl -L -o /tmp/quality-gate "$DOWNLOAD_URL"
+        chmod +x /tmp/quality-gate
+        sudo mv /tmp/quality-gate /usr/local/bin/quality-gate
+
+        # Verify installation
+        quality-gate --version
+
+        echo "::endgroup::"
+
+    - name: Validate Configuration
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "::group::Validating Configuration"
+
+        if [ ! -f "${{ inputs.config-file }}" ]; then
+          echo "::warning::Configuration file '${{ inputs.config-file }}' not found. Creating default configuration..."
+          quality-gate --init
+        else
+          echo "✅ Configuration file found: ${{ inputs.config-file }}"
+          cat "${{ inputs.config-file }}"
+        fi
+
+        echo "::endgroup::"
+
+    - name: Install Dependencies
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "::group::Installing Quality Tools"
+
+        # Extract and install tools from configuration
+        if command -v yq >/dev/null 2>&1; then
+          echo "Using yq to parse configuration..."
+          yq eval '.tools[].install_command' "${{ inputs.config-file }}" 2>/dev/null | while IFS= read -r cmd; do
+            if [ -n "$cmd" ] && [ "$cmd" != "null" ]; then
+              echo "Installing tool: $cmd"
+              eval "$cmd" || echo "::warning::Failed to install tool with command: $cmd"
+            fi
+          done
+        else
+          echo "::notice::yq not available. Skipping automatic tool installation. Tools will be installed on-demand."
+        fi
+
+        echo "::endgroup::"
+
+    - name: Run Quality Gate
+      id: quality-gate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set +e  # Don't exit on error, we want to capture the result
+
+        echo "::group::Running Quality Gate"
+
+        # Build command
+        COMMAND="quality-gate"
+
+        if [ "${{ inputs.json-output }}" = "true" ]; then
+          COMMAND="$COMMAND --output=json"
+        fi
+
+        if [ "${{ inputs.auto-fix }}" = "true" ]; then
+          COMMAND="$COMMAND --fix"
+        fi
+
+        COMMAND="$COMMAND ${{ inputs.hook }}"
+
+        echo "Executing: $COMMAND"
+
+        # Execute and capture output
+        START_TIME=$(date +%s%3N)
+        OUTPUT=$($COMMAND 2>&1)
+        EXIT_CODE=$?
+        END_TIME=$(date +%s%3N)
+        DURATION=$((END_TIME - START_TIME))
+
+        # Set outputs
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "result=success" >> $GITHUB_OUTPUT
+          echo "✅ Quality gate passed"
+        else
+          echo "result=failure" >> $GITHUB_OUTPUT
+          echo "❌ Quality gate failed"
+        fi
+
+        echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
+        # Handle output (escape for GitHub Actions)
+        if [ "${{ inputs.json-output }}" = "true" ]; then
+          # For JSON output, we need to properly escape it
+          ESCAPED_OUTPUT=$(echo "$OUTPUT" | jq -Rs .)
+          echo "output=$ESCAPED_OUTPUT" >> $GITHUB_OUTPUT
+        else
+          # For regular output, escape newlines
+          ESCAPED_OUTPUT="${OUTPUT//'%'/'%25'}"
+          ESCAPED_OUTPUT="${ESCAPED_OUTPUT//$'\n'/'%0A'}"
+          ESCAPED_OUTPUT="${ESCAPED_OUTPUT//$'\r'/'%0D'}"
+          echo "output=$ESCAPED_OUTPUT" >> $GITHUB_OUTPUT
+        fi
+
+        echo "::endgroup::"
+
+        # Display results
+        echo "::group::Quality Gate Results"
+        echo "$OUTPUT"
+        echo "::endgroup::"
+
+        # Handle failure
+        if [ $EXIT_CODE -ne 0 ] && [ "${{ inputs.fail-on-error }}" = "true" ]; then
+          echo "::error::Quality gate failed with exit code $EXIT_CODE"
+          exit $EXIT_CODE
+        fi
+
+    - name: Summary
+      if: always()
+      shell: bash
+      run: |
+        echo "::group::Quality Gate Summary"
+        echo "- Result: ${{ steps.quality-gate.outputs.result }}"
+        echo "- Duration: ${{ steps.quality-gate.outputs.duration }}ms"
+        echo "- Hook: ${{ inputs.hook }}"
+        echo "- Auto-fix: ${{ inputs.auto-fix }}"
+        echo "- JSON Output: ${{ inputs.json-output }}"
+        echo "::endgroup::"
